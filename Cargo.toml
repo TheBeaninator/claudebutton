@@ -1,0 +1,25 @@
+[package]
+name = "claudebutton"
+version = "0.1.0"
+edition = "2021"
+description = "Repurpose weird HID devices into Claude control"
+license = "MIT"
+readme = "README.md"
+keywords = ["hid", "evdev", "uinput", "bluetooth", "remote"]
+categories = ["command-line-utilities"]
+# repository = "https://github.com/<you>/claudebutton"   # set before publishing
+
+[dependencies]
+evdev = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+anyhow = "1"
+
+[[bin]]
+name = "claudebutton"
+path = "src/main.rs"
+
+[profile.release]
+strip = true
+lto = true

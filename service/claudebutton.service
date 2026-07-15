@@ -1,0 +1,15 @@
+[Unit]
+Description=ClaudeButton — weird HID devices -> Claude control
+After=bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+# Runs as root: reads /dev/input and writes /dev/uinput directly (no group/ACL
+# setup, no relogin). A root-created uinput keyboard reaches the active X session.
+WorkingDirectory=/home/dad/Code/ClaudeButton
+ExecStart=/home/dad/Code/ClaudeButton/target/release/claudebutton
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

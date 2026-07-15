@@ -1,0 +1,25 @@
+# JX-05 BLE ring — 5-clicky-button D-pad whose Jieli firmware FAKES a touchpad:
+# each button fires a canned swipe stroke on an emulated digitizer. So we use the
+# `gesture` translator to classify the strokes and map them to keys.
+# Full RE notes: device-workshop/device-files/JX-05/skills.md
+name: jx05
+
+# which /dev/input nodes are this device's (matched by evdev name)
+match:
+  name_prefix: "JX-05"
+
+# BLE auto-reconnect when the ring sleeps. MUST use the CSR dongle (has an
+# antenna); the Intel hci0 is antenna-less (-95 dBm -> drops everything).
+reconnect:
+  mac: "A7:B6:5E:94:60:D5"
+  adapter: "00:1A:7D:DA:71:13"   # CSR dongle; NOT Intel 8C:1D:96:94:E2:19
+
+translator:
+  kind: gesture
+  tap_dist: 400          # strokes are ~1600-2400 units; a center tap is ~0
+  map:
+    up: KEY_UP           # scroll / history up
+    down: KEY_DOWN       # scroll / history down
+    tap: KEY_ENTER       # center button -> submit
+    left: KEY_ESC        # -> interrupt
+    right: KEY_RIGHT     # -> accept autocomplete/ghost suggestion (or KEY_TAB)
