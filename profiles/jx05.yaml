@@ -21,5 +21,7 @@ translator:
     up: KEY_UP           # scroll / history up
     down: KEY_DOWN       # scroll / history down
     tap: KEY_ENTER       # center button -> submit
-    left: KEY_ESC        # -> interrupt
-    right: KEY_RIGHT     # -> accept autocomplete/ghost suggestion (or KEY_TAB)
+    # NOTE: this ring reports X mirrored vs its physical buttons (ring orientation),
+    # so gesture left/right = the OPPOSITE physical button. Assigned for correct feel:
+    left: KEY_RIGHT      # physical RIGHT button -> accept autocomplete/ghost suggestion
+    right: KEY_ESC       # physical LEFT button  -> interrupt
