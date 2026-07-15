@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 keywords = ["hid", "evdev", "uinput", "bluetooth", "remote"]
 categories = ["command-line-utilities"]
-repository = "https://github.com/BeanCounterTop/claudebutton"
+repository = "https://github.com/TheBeaninator/claudebutton"
 
 [dependencies]
 evdev = "0.12"
