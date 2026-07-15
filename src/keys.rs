@@ -95,6 +95,32 @@ pub fn code(name: &str) -> Option<u16> {
     Some(k.code())
 }
 
+/// Map a printable character to a `(keycode, needs_shift)` pair, for typing text
+/// via a macro binding. Returns None for characters we can't emit. Newlines are
+/// handled by the caller (Enter), not here.
+pub fn char_key(c: char) -> Option<(u16, bool)> {
+    use evdev::Key as K;
+    let pair = match c {
+        'a'..='z' => (code(&format!("KEY_{}", c.to_ascii_uppercase()))?, false),
+        'A'..='Z' => (code(&format!("KEY_{c}"))?, true),
+        '1'..='9' => (K::KEY_1.code() + (c as u16 - '1' as u16), false),
+        '0' => (K::KEY_0.code(), false),
+        ' ' => (K::KEY_SPACE.code(), false),
+        '.' => (K::KEY_DOT.code(), false),
+        ',' => (K::KEY_COMMA.code(), false),
+        '-' => (K::KEY_MINUS.code(), false),
+        '_' => (K::KEY_MINUS.code(), true),
+        '/' => (K::KEY_SLASH.code(), false),
+        '?' => (K::KEY_SLASH.code(), true),
+        ';' => (K::KEY_SEMICOLON.code(), false),
+        ':' => (K::KEY_SEMICOLON.code(), true),
+        '\'' => (K::KEY_APOSTROPHE.code(), false),
+        '!' => (K::KEY_1.code(), true),
+        _ => return None,
+    };
+    Some(pair)
+}
+
 /// Resolve an absolute-axis name ("ABS_HAT0Y") to its code, for the `axis`
 /// translator. Returns None for unknown names (fails at profile load).
 pub fn abs_code(name: &str) -> Option<u16> {

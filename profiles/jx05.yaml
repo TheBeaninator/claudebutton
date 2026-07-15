@@ -14,6 +14,17 @@ reconnect:
   mac: "A7:B6:5E:94:60:D5"
   adapter: "00:1A:7D:DA:71:13"   # CSR dongle; NOT Intel 8C:1D:96:94:E2:19
 
+# The right button also fires KEY_POWER on the ring's separate "JX-05 Consumer
+# Control" node (which this profile grabs, so it never reaches the OS). Use a
+# `click` translator so "continue" fires ONLY on a clean tap — a KEY_POWER press
+# (value 1) immediately followed by release (value 0). A held button autorepeats
+# (value 2) between the 1 and the 0, so a hold does not fire. A `type:` value
+# types literal text; the trailing newline is Enter.
+translators:
+  - kind: click
+    map:
+      KEY_POWER: "type:continue\n"
+
 translator:
   kind: gesture
   tap_dist: 400          # strokes are ~1600-2400 units; a center tap is ~0

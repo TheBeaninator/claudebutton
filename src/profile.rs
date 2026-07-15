@@ -20,6 +20,25 @@ use serde::Deserialize;
 use crate::gesture::{name as gesture_name, GestureEngine};
 use crate::keys;
 
+/// What a matched input produces: a single key tap, or literal text to type.
+/// In a profile map, a value of `type:...` becomes `Type` (a `\n` in it is Enter);
+/// anything else is resolved as a key name into `Key`.
+#[derive(Clone, Debug)]
+pub enum Action {
+    Key(u16),
+    Type(String),
+}
+
+/// Parse one profile map value into an `Action`.
+fn parse_binding(s: &str) -> Result<Action> {
+    if let Some(text) = s.strip_prefix("type:") {
+        Ok(Action::Type(text.to_string()))
+    } else {
+        let code = keys::code(s).ok_or_else(|| anyhow!("unknown key name '{s}'"))?;
+        Ok(Action::Key(code))
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Profile {
     pub name: String,
@@ -92,7 +111,13 @@ pub enum TranslatorSpec {
         map: HashMap<String, String>,
     },
     /// Device sends real key codes; remap input key name -> output key name.
+    /// Fires on press (value 1).
     Keymap { map: HashMap<String, String> },
+    /// Like `keymap`, but fires only on a *clean click*: a key's press (value 1)
+    /// immediately followed by its release (value 0), with no autorepeat (value
+    /// 2) in between. A held button autorepeats and so never fires — this is how
+    /// a quick tap is told apart from a hold on the same key.
+    Click { map: HashMap<String, String> },
     /// Device has absolute axes (joystick stick / hat / dpad). Map an axis and a
     /// direction ("ABS_HAT0Y-") to a key, fired once when the axis enters that
     /// direction. `center`/`threshold` define the dead zone (hat: 0/1; an analog
@@ -111,10 +136,8 @@ impl TranslatorSpec {
         match self {
             TranslatorSpec::Gesture { tap_dist, map } => {
                 let mut out = HashMap::new();
-                for (g, keyname) in map {
-                    let code = keys::code(keyname)
-                        .ok_or_else(|| anyhow!("unknown key name '{keyname}'"))?;
-                    out.insert(g.to_lowercase(), code);
+                for (g, binding) in map {
+                    out.insert(g.to_lowercase(), parse_binding(binding)?);
                 }
                 Ok(Translator::Gesture {
                     engine: GestureEngine::new(tap_dist.unwrap_or(400.0)),
@@ -126,18 +149,28 @@ impl TranslatorSpec {
                 for (from, to) in map {
                     let fc = keys::code(from)
                         .ok_or_else(|| anyhow!("unknown input key name '{from}'"))?;
-                    let tc =
-                        keys::code(to).ok_or_else(|| anyhow!("unknown output key name '{to}'"))?;
-                    out.insert(fc, tc);
+                    out.insert(fc, parse_binding(to)?);
                 }
                 Ok(Translator::Keymap { map: out })
+            }
+            TranslatorSpec::Click { map } => {
+                let mut out = HashMap::new();
+                for (from, to) in map {
+                    let fc = keys::code(from)
+                        .ok_or_else(|| anyhow!("unknown input key name '{from}'"))?;
+                    out.insert(fc, parse_binding(to)?);
+                }
+                Ok(Translator::Click {
+                    map: out,
+                    armed: HashMap::new(),
+                })
             }
             TranslatorSpec::Axis {
                 center,
                 threshold,
                 map,
             } => {
-                let mut out: HashMap<(u16, i8), u16> = HashMap::new();
+                let mut out: HashMap<(u16, i8), Action> = HashMap::new();
                 let mut axes = HashSet::new();
                 for (spec, keyname) in map {
                     let (axis_name, sign) = if let Some(a) = spec.strip_suffix('-') {
@@ -149,8 +182,7 @@ impl TranslatorSpec {
                     };
                     let axis = keys::abs_code(axis_name)
                         .ok_or_else(|| anyhow!("unknown axis '{axis_name}'"))?;
-                    let key =
-                        keys::code(keyname).ok_or_else(|| anyhow!("unknown key '{keyname}'"))?;
+                    let key = parse_binding(keyname)?;
                     out.insert((axis, sign), key);
                     axes.insert(axis);
                 }
@@ -171,32 +203,67 @@ impl TranslatorSpec {
 pub enum Translator {
     Gesture {
         engine: GestureEngine,
-        map: HashMap<String, u16>,
+        map: HashMap<String, Action>,
     },
     Keymap {
-        map: HashMap<u16, u16>,
+        map: HashMap<u16, Action>,
+    },
+    Click {
+        map: HashMap<u16, Action>,
+        /// Per-key: saw a press (value 1) that hasn't been disarmed by an
+        /// autorepeat. A release while armed is a clean click.
+        armed: HashMap<u16, bool>,
     },
     Axis {
         center: i32,
         threshold: i32,
-        map: HashMap<(u16, i8), u16>,
+        map: HashMap<(u16, i8), Action>,
         axes: HashSet<u16>,
         last: HashMap<u16, i8>,
     },
 }
 
 impl Translator {
-    pub fn handle(&mut self, ev: &InputEvent) -> Option<u16> {
+    pub fn handle(&mut self, ev: &InputEvent) -> Option<Action> {
         match self {
             Translator::Gesture { engine, map } => {
                 let g = engine.feed(ev)?;
-                map.get(gesture_name(g)).copied()
+                map.get(gesture_name(g)).cloned()
             }
             Translator::Keymap { map } => {
                 if ev.event_type() == EventType::KEY && ev.value() == 1 {
-                    map.get(&ev.code()).copied()
+                    map.get(&ev.code()).cloned()
                 } else {
                     None
+                }
+            }
+            Translator::Click { map, armed } => {
+                if ev.event_type() != EventType::KEY {
+                    return None;
+                }
+                let code = ev.code();
+                if !map.contains_key(&code) {
+                    return None;
+                }
+                match ev.value() {
+                    // press: arm this key
+                    1 => {
+                        armed.insert(code, true);
+                        None
+                    }
+                    // release: a clean click only if still armed (no autorepeat)
+                    0 => {
+                        if armed.remove(&code).unwrap_or(false) {
+                            map.get(&code).cloned()
+                        } else {
+                            None
+                        }
+                    }
+                    // autorepeat (2) or anything else: it's a hold — disarm
+                    _ => {
+                        armed.insert(code, false);
+                        None
+                    }
                 }
             }
             Translator::Axis {
@@ -225,7 +292,7 @@ impl Translator {
                 if zone != prev {
                     last.insert(code, zone);
                     if zone != 0 {
-                        return map.get(&(code, zone)).copied();
+                        return map.get(&(code, zone)).cloned();
                     }
                 }
                 None
@@ -313,6 +380,40 @@ translator:
     }
 
     #[test]
+    fn click_type_binding_fires_on_clean_tap_not_hold() {
+        // Mirrors jx05.yaml: the ring's KEY_POWER -> a "continue" macro, but only
+        // on a clean press+release (a hold autorepeats and must not fire).
+        let yaml = r#"
+name: ring
+match:
+  name_prefix: "JX-05"
+translators:
+  - kind: click
+    map:
+      KEY_POWER: "type:continue\n"
+"#;
+        let p: Profile = serde_yaml::from_str(yaml).unwrap();
+        let mut ts = p.build_translators().unwrap();
+        let power = keys::code("KEY_POWER").unwrap();
+        let down = InputEvent::new(EventType::KEY, power, 1);
+        let up = InputEvent::new(EventType::KEY, power, 0);
+        let repeat = InputEvent::new(EventType::KEY, power, 2);
+
+        // clean tap: press arms (no fire), release fires the macro
+        assert!(ts[0].handle(&down).is_none());
+        match ts[0].handle(&up) {
+            Some(Action::Type(s)) => assert_eq!(s, "continue\n"),
+            other => panic!("expected Type action, got {other:?}"),
+        }
+        // hold: press, autorepeat, release -> disarmed, so no fire
+        assert!(ts[0].handle(&down).is_none());
+        assert!(ts[0].handle(&repeat).is_none());
+        assert!(ts[0].handle(&up).is_none());
+        // a lone release with no preceding press -> nothing
+        assert!(ts[0].handle(&up).is_none());
+    }
+
+    #[test]
     fn multi_translator_axis_and_keymap() {
         let yaml = r#"
 name: pad
@@ -339,12 +440,16 @@ translators:
             keys::abs_code("ABS_HAT0Y").unwrap(),
             -1,
         );
-        assert_eq!(ts[0].handle(&up), keys::code("KEY_UP"));
+        assert!(
+            matches!(ts[0].handle(&up), Some(Action::Key(c)) if c == keys::code("KEY_UP").unwrap())
+        );
         // returning to center yields nothing
         let center = InputEvent::new(EventType::ABSOLUTE, keys::abs_code("ABS_HAT0Y").unwrap(), 0);
-        assert_eq!(ts[0].handle(&center), None);
+        assert!(ts[0].handle(&center).is_none());
         // BTN_EAST press -> KEY_ENTER via the keymap translator
         let btn = InputEvent::new(EventType::KEY, keys::code("BTN_EAST").unwrap(), 1);
-        assert_eq!(ts[1].handle(&btn), keys::code("KEY_ENTER"));
+        assert!(
+            matches!(ts[1].handle(&btn), Some(Action::Key(c)) if c == keys::code("KEY_ENTER").unwrap())
+        );
     }
 }

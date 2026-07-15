@@ -26,7 +26,7 @@ use anyhow::{bail, Result};
 use evdev::{Device, EventType, InputEvent};
 
 use inject::Injector;
-use profile::{Profile, Translator};
+use profile::{Action, Profile, Translator};
 
 /// println! + immediate flush. Rust's Stdout block-buffers to a pipe (journald),
 /// so a plain println! would delay a daemon's logs; flush keeps them live.
@@ -189,9 +189,17 @@ fn run_daemon(profiles_dir: String) -> Result<()> {
             Ok(Msg::Event { profile, ev }) => {
                 if let Some(ts) = translators.get_mut(&profile) {
                     for t in ts.iter_mut() {
-                        if let Some(code) = t.handle(&ev) {
-                            logln!("  {profile} -> {}", keys::name(code));
-                            let _ = injector.tap(code);
+                        if let Some(action) = t.handle(&ev) {
+                            match action {
+                                Action::Key(code) => {
+                                    logln!("  {profile} -> {}", keys::name(code));
+                                    let _ = injector.tap(code);
+                                }
+                                Action::Type(text) => {
+                                    logln!("  {profile} -> type {text:?}");
+                                    let _ = injector.type_text(&text);
+                                }
+                            }
                             break;
                         }
                     }
